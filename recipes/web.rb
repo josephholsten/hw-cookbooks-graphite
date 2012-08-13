@@ -48,6 +48,13 @@ dep_packages.each do |pkg|
   end
 end
 
+sysadmins = if Chef::Config[:solo]
+  Chef::Log.warn("This recipe uses search. Chef Solo does not support search.")
+  []
+else
+  search(:users, 'groups:sysadmin')
+end
+
 remote_file "#{Chef::Config[:file_cache_path]}/graphite-web-#{version}.tar.gz" do
   source node['graphite']['graphite_web']['uri']
   checksum node['graphite']['graphite_web']['checksum']
@@ -65,8 +72,25 @@ execute "install graphite-web" do
   cwd "#{Chef::Config[:file_cache_path]}/graphite-web-#{version}"
 end
 
+case node['graphite']['server_auth_method']
+when "openid"
+  include_recipe "apache2::mod_auth_openid"
+else
+  template "#{node['graphite']['conf_dir']}/htpasswd.users" do
+    source "htpasswd.users.erb"
+    owner node['apache']['user']
+    group node['apache']['group']
+    mode 0640
+    variables(
+      :sysadmins => sysadmins
+    )
+  end
+end
+
 template "#{node['apache']['dir']}/sites-available/graphite" do
   source "graphite-vhost.conf.erb"
+  mode 0644
+  notifies :reload, "service[apache2]"
 end
 
 apache_site "graphite"
